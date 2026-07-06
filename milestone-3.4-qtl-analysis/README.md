@@ -53,6 +53,7 @@ Pseudobulk expression was residualized using the model:
 ```r
 ~ sex + scale(age) + log(n_genes) + percent_mito +
   mito_genes + mito_ribo + ribo_genes
+```
 
 ## 5. Outlier QC
 
