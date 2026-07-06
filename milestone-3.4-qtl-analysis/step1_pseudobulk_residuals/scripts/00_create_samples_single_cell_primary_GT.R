@@ -1,4 +1,3 @@
-(scanpy310) [girdhk01@li04e04 scripts]$ cat create_samples_single_cell_primary_GT.R
 #!/usr/bin/env Rscript
 
 # Create samples_single_cell_primary_GT.csv.
