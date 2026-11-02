@@ -59,7 +59,7 @@ These flags were stored for downstream use; they were not used to filter genes.
 
 **Cell filtering.** Three metrics were computed per cell over the retained genes: the total UMI count (`n_counts`), the number of detected genes (`n_genes`), and the percentage of UMIs from mitochondrially encoded genes (`percent_mito`). (pegasus keeps `n_counts` and `n_genes` unchanged if they are already present in the input.)
 
-Thresholds for `n_counts` and `n_genes` were set by a median absolute deviation (MAD) rule on the log scale (`sct.pp.qc_boundary`). For a metric $x$, let $y = \log(1 + x)$, $m = \operatorname{median}(y)$ and $\mathrm{MAD} = \operatorname{median}(|y - m|)$, unscaled. The lower and upper thresholds were then $L = \exp(m - k \cdot \mathrm{MAD})$ and $U = \exp(m + k \cdot \mathrm{MAD})$, with $k = 3$.
+Thresholds for `n_counts` and `n_genes` were set by a median absolute deviation (MAD) rule on the log scale (`sct.pp.qc_boundary`). For a metric $x$, let $y = \log(1 + x)$, $m = \mathrm{median}(y)$ and $\mathrm{MAD} = \mathrm{median}(|y - m|)$, unscaled. The lower and upper thresholds were then $L = \exp(m - k \cdot \mathrm{MAD})$ and $U = \exp(m + k \cdot \mathrm{MAD})$, with $k = 3$.
 
 A cell passed QC if all of the following held:
 - $L \le$ `n_counts` $< U$
@@ -109,7 +109,7 @@ Highly variable features (HVFs) were selected anew for every clustering and embe
 **Selection.** HVFs were selected by the dispersion-based `cell_ranger` procedure (ref. 6) in scanpy:
 1. For each gene, the mean $\mu_g$ and variance $\sigma_g^2$ of log-normalised expression were computed across the input's cells, giving dispersion $d_g = \sigma_g^2 / \mu_g$.
 2. Genes were binned by $\mu_g$ at the 10th, 15th, …, 100th percentiles. The lowest bin holds 10% of genes and each further bin 5%.
-3. Each dispersion was normalised within its bin as $(d_g - \operatorname{median}_b d)/\operatorname{MAD}_b(d)$, where the MAD is scaled for consistency with the normal distribution.
+3. Each dispersion was normalised within its bin as $(d_g - \mathrm{median}_b\, d)/\mathrm{MAD}_b(d)$, where the MAD is scaled for consistency with the normal distribution.
 4. The genes with the highest normalised dispersion were selected; genes tied at the cut-off were also kept.
 
 **Number of HVFs.**
@@ -177,7 +177,7 @@ Doublets were detected on the output of pass 1 with the Scrublet algorithm (ref.
 1. **Features.** Raw counts were taken for the 3,000 HVFs selected at the class level of pass 1.
 2. **Simulated doublets.** Twice as many artificial doublets as observed cells were simulated by summing the count profiles of randomly chosen pairs of observed cells.
 3. **Embedding.** Observed and simulated profiles were normalised to their total counts and standardised using the observed cells' statistics. Thirty principal components were fitted on the observed cells, and the simulated doublets were projected onto them.
-4. **Neighbours.** For each profile, the $k_{\mathrm{adj}} = \operatorname{round}(k(1 + r))$ nearest neighbours were found, where $k = \operatorname{round}(0.5\sqrt{n})$ for *n* observed cells and $r = 2$ is the simulation ratio.
+4. **Neighbours.** For each profile, the $k_{\mathrm{adj}} = \mathrm{round}(k(1 + r))$ nearest neighbours were found, where $k = \mathrm{round}(0.5\sqrt{n})$ for *n* observed cells and $r = 2$ is the simulation ratio.
 5. **Doublet score.** Let $k_d$ be the number of simulated doublets among a profile's neighbours, $q = (k_d + 1)/(k_{\mathrm{adj}} + 2)$, and $\rho$ the expected doublet rate. The score was $\frac{q\rho/r}{(1-\rho) - q(1 - \rho - \rho/r)}$.
 6. **Expected doublet rate.** $\rho$ came from a Poisson model of the 10x Genomics multiplet table. With $\lambda = 0.00785 \times n/500$, $\rho = \frac{1 - (1+\lambda)e^{-\lambda}}{1 - e^{-\lambda}}$.
 7. **Threshold.** The doublet-score threshold was inferred automatically for each library from the kernel density of log-transformed simulated-doublet scores, using a signed-curvature criterion. Cells scoring above it were predicted doublets.
@@ -246,7 +246,7 @@ Cells whose transcriptome is a mixture of cell types from different lineages wer
 
 **Mixture model.** Let $\mathbf{x}_i$ be the panel counts of cell $i$, with total $n_i$. The model is
 
-$$\mathbf{x}_i \sim \operatorname{Multinomial}\!\left(n_i,\ \textstyle\sum_k w_{ik}\,\mathbf{p}_k\right),$$
+$$\mathbf{x}_i \sim \mathrm{Multinomial}\!\left(n_i,\ \textstyle\sum_k w_{ik}\,\mathbf{p}_k\right),$$
 
 where $\mathbf{p}_k$ is the fixed profile of subclass $k$ and $w_{ik}$ are per-cell mixing weights with $\sum_k w_{ik} = 1$.
 - The profile $\mathbf{p}_k$ is the mean per-cell panel proportion of the subclass's reference cells, plus a pseudocount of 10⁻⁶, renormalised to sum to 1.
