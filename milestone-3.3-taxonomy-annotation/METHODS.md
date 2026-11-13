@@ -1,6 +1,6 @@
 # Methods: GENESIS unified single-cell RNA-seq processing pipeline
 
-This document describes the statistical methods, design and processing steps of the GENESIS unified processing pipeline, version 1.0.1 (the code in this directory, forked from GENESIS_iClust v1.0.1). Instructions for running the code are in [README.md](README.md). Parameter values given below are the defaults used by the Snakemake workflows in this directory. Throughout, "cell" refers to one barcode, whether it captured a whole cell or a nucleus.
+This document describes the statistical methods, design and processing steps of the GENESIS unified processing pipeline, version 1.2.0 (the code in this directory, forked from GENESIS_iClust v1.0.1 and updated to v1.2.0). Release rc2 was made with version 1.0.1, which differs in step 10; see [Releases and pipeline versions](#releases-and-pipeline-versions). Instructions for running the code are in [README.md](README.md). Parameter values given below are the defaults used by the Snakemake workflows in this directory. Throughout, "cell" refers to one barcode, whether it captured a whole cell or a nucleus.
 
 ## Pipeline design
 
@@ -28,7 +28,7 @@ The pipeline turns the per-library count matrices of one cohort into a quality-c
 | `TEST_pass3.smk` | Cluster exclusion | `08_subset.py` | listed subtypes removed |
 | | Clustering, pass 3 | `06_iclust.py` | final subtypes |
 | `TEST_rc2.smk` | Taxonomy assignment | `09_annotate.py` | curated class/subclass labels, re-embedded |
-| | Mixed-lineage and outlier removal | `10_clean.py` | cleaned cells |
+| | Removal of mixed-lineage cells and of cells among another subclass | `10_clean.py` | cleaned cells |
 | | Final embedding | `11_umap.py` | release dataset |
 
 ## Input data
@@ -263,14 +263,23 @@ $$w_{ik} \leftarrow \frac{w_{ik}}{n_i} \sum_g \frac{x_{ig}\, p_{kg}}{\sum_l w_{i
 
 This keeps the minority of contaminated cells from leaking into the profiles.
 
-**Flagging.** With the final profiles, the foreign score of cell $i$ was $f_i = 1 - \sum_{k:\ \mathrm{lineage}(k) = \mathrm{lineage}(i)} w_{ik}$. This is the fraction of the cell's panel UMIs attributed to other lineages: about 0 for clean cells and about 0.5 for a doublet of two cells with similar panel depth. Cells with $f_i \ge 0.3$ were flagged and removed.
+**Foreign share.** With the final profiles, the foreign share of cell $i$ was $f_i = 1 - \sum_{k:\ \mathrm{lineage}(k) = \mathrm{lineage}(i)} w_{ik}$. This is the fraction of the cell's panel UMIs attributed to other lineages: about 0 for clean cells and about 0.5 for a doublet of two cells with similar panel depth. The lineage of cell $i$ is the lineage of its curated label, so a neuron labelled as a glial cell is scored on its neuronal RNA.
 
-## Removal of embedding outliers
+**Amount of foreign RNA.** Cells were flagged on the amount of RNA they carry from another lineage, in nucleus equivalents, rather than on $f_i$. A share depends on the size of the host nucleus: a small nucleus with ordinary ambient RNA can pass a share cut-off, and a large neuron carrying the RNA of a whole glial cell can stay below it. Libraries were the 10x channels (`Channel`).
+1. *Typical cells.* For each subclass, the half of its cells with the lowest $f_i$, chosen across all libraries.
+2. *Typical size and library depth.* The log panel UMIs of typical cells were modelled as $\log s_k + \log d_b$, for subclass $k$ and library $b$. Both factors were fitted jointly by alternating medians (median polish): library depths from the median residual of each library's typical cells, then subclass sizes from the median residual of each subclass's typical cells, until no factor changed by more than 10⁻⁶ (at most 100 rounds). Depths were centred on the median library, so $s_k$ is the panel UMIs of a typical nucleus of subclass $k$ in the median library. Libraries with fewer than 20 typical cells kept $d_b = 1$. Fitting the two factors jointly matters because glia-rich libraries tend to be sequenced more deeply; pooled medians would then make glia look larger than they are and undercount glial RNA attached to neurons.
+3. *Amount.* The RNA of cell $i$ from lineage $L$, in nucleus equivalents, was
+$$a_{iL} = \sum_{k:\ \mathrm{lineage}(k) = L} \frac{w_{ik}\, n_i}{s_k\, d_{b(i)}}.$$
+4. *Flagging.* Cells with $\max_{L \ne \mathrm{lineage}(i)} a_{iL} \ge 0.25$ were flagged and removed. The largest single other lineage was used, not the sum over lineages, because ambient RNA is spread thinly over all lineages while material from one attached cell is concentrated in one. Ambient RNA amounts to a few hundredths of a nucleus, nuclei carrying material from another cell to about 0.3–0.6, and heterotypic doublets to about 1.
 
-Among the cells not flagged as mixed, cells isolated from the rest of their subclass in the integrated embedding were identified with the local outlier factor (LOF; ref. 21; scikit-learn, via `sct.tl.detect_outliers`). LOF was fitted separately for each curated subclass, on the 30 Harmony-corrected components from the re-embedding in step 09, with Euclidean distance.
-- Number of neighbours: 4% of the subclass's cells, bounded to the range 100–4,000 and at most *n* − 1.
-- Cells with a LOF score above 1.5 were classified as outliers (scikit-learn `contamination="auto"`).
-- Subclasses with fewer than 100 cells were not assessed.
+## Removal of cells among another subclass
+
+Among the cells not flagged as mixed, cells that sit among cells of another subclass in the integrated embedding were removed (`sct.tl.detect_outliers` with `method="neighbor_label"`; SCTools).
+- **Neighbours.** For each cell, its 15 nearest cells by Euclidean distance in the 30 Harmony-corrected components from the re-embedding in step 09. The search was exact and ran over the retained cells of all subclasses together; the cell itself was excluded. Cells flagged as mixed were neither scored nor used as neighbours.
+- **Agreement.** The fraction of the 15 neighbours that carry the cell's curated subclass.
+- **Flagging.** Cells with an agreement below 1/3, that is, at most 4 of their 15 neighbours in their own subclass, were classified as outliers. Subclasses with fewer than 100 cells were not assessed, but their cells still served as neighbours.
+
+The final UMAP (step 11) places each cell from its 15 nearest neighbours, so a cell whose neighbours carry another subclass is drawn inside that subclass's island, away from its own. The cut was chosen by re-embedding the retained cells of one cohort as in step 11, without outlier removal, and measuring at each neighbour count how often cells ended up away from their subclass in that UMAP. Cells with at most 4 of 15 neighbours in their own subclass did so more often than not, and cells with 5–7 less than half the time. The rule compares labels, not densities. It therefore does not depend on subclass size, and a small subtype that sits apart from the rest of its subclass is kept, because its neighbours share its subclass.
 
 Cells flagged as mixed or as outliers were removed on disk (`10_clean.py`), and UMAPs of the removed and retained cells were saved.
 
@@ -282,32 +291,40 @@ The retained cells were re-embedded as in step 09 (6,000 HVFs, PCA, regression, 
 - QC metrics, signature scores and doublet scores
 - the corrected components and the UMAP coordinates
 
+## Releases and pipeline versions
+
+Release rc2 was made with pipeline version 1.0.1 (GENESIS_iClust tag `v1.0.1`, SCTools 0.5.0). Versions 1.1.0 and 1.2.0 changed only step 10 (`10_clean.py`), so rc2 cannot be reproduced with the current code; use version 1.0.1. In rc2:
+- **Mixed-lineage cells** were flagged on the foreign share, $f_i \ge 0.3$, instead of on the amount of foreign RNA. Version 1.1.0 introduced the amount.
+- **Outliers** were found with the local outlier factor (LOF; ref. 21; scikit-learn), not with the neighbours' labels. LOF was fitted separately for each curated subclass on the 30 Harmony-corrected components from step 09, with Euclidean distance. The number of neighbours was 4% of the subclass's cells, bounded to 100–4,000 and at most *n* − 1. Cells with a LOF score above 1.5 (scikit-learn `contamination="auto"`) were classified as outliers, and subclasses with fewer than 100 cells were not assessed.
+
+Version 1.2.0 replaced LOF because it did not remove the cells it was meant to remove: those drawn away from their subclass on the final UMAP. LOF compares a cell only with cells of its own subclass, so it cannot tell that a cell sits among another subclass. With hundreds to thousands of neighbours, it also flagged compact groups smaller than that number, such as small subtypes and the cells of donor-specific states, when they sat apart from the rest of their subclass. In `10_clean.py`, `--outlier_method lof` still runs the rc2 outlier rule.
+
 ## Reproducibility
 
-All stochastic steps used random seed 0: PCA, Harmony, neighbour-index construction, Leiden, UMAP, doublet simulation, the *k*-means steps of signature scoring, and reference sampling for the mixing model.
+All stochastic steps used random seed 0: PCA, Harmony, neighbour-index construction, Leiden, UMAP, doublet simulation, the *k*-means steps of signature scoring, and reference sampling for the mixing model. The neighbour search in step 10 is exact and has no random component.
 
 Two aspects can still vary between runs:
 - With multithreading, Harmony can differ between runs at the order of 10⁻⁵ in the corrected components. UMAP coordinates can amplify these differences. Single-threaded Harmony (`n_jobs=1`) gives bit-identical results.
 - Outputs depend on the software versions in Table 2. All steps were run in one conda environment (`py312`), orchestrated by Snakemake (ref. 22).
 
-**Table 2 | Software and versions** (reference environment used to validate pipeline version 1.0.1).
+**Table 2 | Software and versions** (reference environment `py312`; release rc2 was made with pipeline version 1.0.1 and SCTools 0.5.0).
 
 | Software | Version | Use |
 | --- | --- | --- |
 | Python | 3.12.11 | runtime |
-| SCTools | 0.5.0 | on-disk H5AD operations, HVF selection, QC thresholds, mixing and outlier detection |
+| SCTools | 0.8.0 (rc2: 0.5.0) | on-disk H5AD operations, HVF selection, QC thresholds, mixing and outlier detection |
 | pegasuspy | 1.10.2 | QC metrics, PCA, regression, neighbours, Leiden, UMAP wrapper, Scrublet, signature scores |
 | pegasusio | 0.9.1 | data input/output |
 | scanpy | 1.11.0 | normalisation, HVF selection, plotting |
 | anndata | 0.10.9 | H5AD data structures |
 | harmony-pytorch | 0.1.8 | Harmony integration |
-| PyTorch | 2.6.0 | Harmony back end |
+| PyTorch | 2.6.0 | Harmony back end; GPU neighbour search in step 10 when a GPU is present |
 | hnswlib | 0.8.0 | approximate nearest neighbours |
 | leidenalg | 0.10.2 | Leiden clustering |
 | igraph | 0.11.8 | graph back end |
 | umap-learn | 0.5.7 | UMAP |
 | pynndescent | 0.5.13 | umap-learn dependency |
-| scikit-learn | 1.5.2 | PCA, regression, exact neighbours, *k*-means, LOF |
+| scikit-learn | 1.5.2 | PCA, regression, exact neighbours, *k*-means, LOF (rc2) |
 | statsmodels | 0.14.4 | MAD in HVF selection, Benjamini–Hochberg correction |
 | NumPy | 1.26.4 | numerical computing |
 | SciPy | 1.15.2 | sparse matrices, MAD in QC thresholds |
@@ -335,7 +352,7 @@ Two aspects can still vary between runs:
 
 ## Code availability
 
-The pipeline code is in this directory (GENESIS unified processing pipeline v1.0.1, forked from GENESIS_iClust v1.0.1). SCTools is available at https://github.com/hoondy/SCTools (v0.5.0). The curation code is in [`milestone-3.3-taxonomy-integration`](../milestone-3.3-taxonomy-integration).
+The pipeline code is in this directory (GENESIS unified processing pipeline v1.2.0, forked from GENESIS_iClust v1.0.1 and updated to v1.2.0). Release rc2 was made with GENESIS_iClust v1.0.1. SCTools is available at https://github.com/hoondy/SCTools (v0.8.0; v0.5.0 for rc2). The curation code is in [`milestone-3.3-taxonomy-integration`](../milestone-3.3-taxonomy-integration).
 
 ## References
 
