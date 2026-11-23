@@ -1,6 +1,6 @@
 # Methods: GENESIS unified single-cell RNA-seq processing pipeline
 
-This document describes the statistical methods, design and processing steps of the GENESIS unified processing pipeline, version 1.2.0 (the code in this directory, forked from GENESIS_iClust v1.0.1 and updated to v1.2.0). Release rc2 was made with version 1.0.1, which differs in step 10; see [Releases and pipeline versions](#releases-and-pipeline-versions). Instructions for running the code are in [README.md](README.md). Parameter values given below are the defaults used by the Snakemake workflows in this directory. Throughout, "cell" refers to one barcode, whether it captured a whole cell or a nucleus.
+This document describes the statistical methods, design and processing steps of the GENESIS unified processing pipeline, version 1.3.0 (the code in this directory, forked from GENESIS_iClust v1.0.1 and updated to v1.3.0). Release rc2 was made with version 1.0.1, which differs in step 10 and in the names of eight genes; see [Releases and pipeline versions](#releases-and-pipeline-versions). Instructions for running the code are in [README.md](README.md). Parameter values given below are the defaults used by the Snakemake workflows in this directory. Throughout, "cell" refers to one barcode, whether it captured a whole cell or a nucleus.
 
 ## Pipeline design
 
@@ -18,7 +18,7 @@ The pipeline turns the per-library count matrices of one cohort into a quality-c
 | Workflow | Step | Script | Output |
 | --- | --- | --- | --- |
 | `TEST_pass2.smk` | Aggregation | `01_aggregate.py` | merged count matrix |
-| | Gene annotation | `02_anno.py` | genes indexed by symbol, with Ensembl annotation |
+| | Gene annotation | `02_anno.py` | genes indexed by symbol (one name per gene), with Ensembl annotation |
 | | Quality control | `03_qc.py` | QC-filtered cells and genes |
 | | Normalisation | `04_norm.py` | log-normalised matrix, raw counts kept |
 | | Signature scores | `05_score.py` | cell-cycle and other signature scores |
@@ -39,7 +39,7 @@ The input is one H5AD file per sequencing library. Each file holds a cell × gen
 
 The libraries listed in a manifest were concatenated row-wise on disk (`sct.io.concat_on_disk`). The metadata of all libraries were concatenated, and the count matrix of each library was appended to a single CSR matrix without being loaded into memory as a whole.
 
-Genes were annotated from the Ensembl release 104 gene table for GRCh38 (`annotation/all_genes_EnsemblInfo_104.csv`). The table supplied, for each Ensembl gene ID, the HGNC symbol, gene biotype, chromosome, and start and end position. Genes without an HGNC symbol kept their Ensembl ID as their name. Genes were then indexed by symbol, and duplicate symbols were made unique by appending `#1`, `#2`, … to later occurrences.
+Genes were annotated from the Ensembl release 104 gene table for GRCh38 (ref. 23), restricted to genes on the primary assembly: chromosomes 1–22, X, Y and MT and the unplaced and unlocalized scaffolds. Genes on alternate haplotypes and patches were left out. The table supplied, for each Ensembl gene ID, the HGNC symbol, gene biotype, chromosome, and start and end position. Each gene was named by its HGNC symbol, and genes without one by their Ensembl ID. Ensembl 104 gives 18 symbols on the primary assembly to two gene IDs each. For each of these, one ID kept the symbol and the other was named by its Ensembl ID. TBCE was assigned to ENSG00000284770, because ENSG00000285053 is a GGPS1–TBCE readthrough gene, and CCDC39 to ENSG00000284862, because ENSG00000145075 is a long non-coding RNA. For the other 16 symbols, the ID present in release rc2 kept the symbol; where neither ID was present, neither kept it. The resulting table (`annotation/all_genes_EnsemblInfo_104_1to1.csv`) gives every gene its own name, and genes were indexed by that name. The step stops with an error if two genes would share a name.
 
 ## Quality control
 
@@ -293,7 +293,8 @@ The retained cells were re-embedded as in step 09 (6,000 HVFs, PCA, regression, 
 
 ## Releases and pipeline versions
 
-Release rc2 was made with pipeline version 1.0.1 (GENESIS_iClust tag `v1.0.1`, SCTools 0.5.0). Versions 1.1.0 and 1.2.0 changed only step 10 (`10_clean.py`), so rc2 cannot be reproduced with the current code; use version 1.0.1. In rc2:
+Release rc2 was made with pipeline version 1.0.1 (GENESIS_iClust tag `v1.0.1`, SCTools 0.5.0). Versions 1.1.0 and 1.2.0 changed step 10 (`10_clean.py`), and version 1.3.0 changed gene names in step 02 (`02_anno.py`), so rc2 cannot be reproduced with the current code; use version 1.0.1. In rc2:
+- **Gene names** came from the full Ensembl 104 table (`annotation/all_genes_EnsemblInfo_104.csv`). Where two gene IDs shared a symbol, the first in gene order kept it and the second was renamed with `#1`. A symbol could therefore point to the wrong gene: `TBCE` is ENSG00000285053, the GGPS1–TBCE readthrough, and TBCE itself (ENSG00000284770) is `TBCE#1`. From version 1.3.0, ENSG00000285053 and ENSG00000145075 (`CCDC39#1` in rc2) are named by their Ensembl IDs, and `TBCE#1`, `DUXAP8#1`, `LINC01238#1`, `LINC02203#1`, `PINX1#1` and `SIGLEC5#1` lose the `#1`. The `rc2_var_name` column of `annotation/all_genes_EnsemblInfo_104_1to1.csv` gives the rc2 name of every gene.
 - **Mixed-lineage cells** were flagged on the foreign share, $f_i \ge 0.3$, instead of on the amount of foreign RNA. Version 1.1.0 introduced the amount.
 - **Outliers** were found with the local outlier factor (LOF; ref. 21; scikit-learn), not with the neighbours' labels. LOF was fitted separately for each curated subclass on the 30 Harmony-corrected components from step 09, with Euclidean distance. The number of neighbours was 4% of the subclass's cells, bounded to 100–4,000 and at most *n* − 1. Cells with a LOF score above 1.5 (scikit-learn `contamination="auto"`) were classified as outliers, and subclasses with fewer than 100 cells were not assessed.
 
@@ -346,13 +347,13 @@ Two aspects can still vary between runs:
 | R, with MetaNeighbor, dplyr, tidyr and ComplexHeatmap | not recorded | consistency filters, curation tables, figures |
 
 **Reference data.**
-- Ensembl release 104 gene annotation for GRCh38 (`annotation/all_genes_EnsemblInfo_104.csv`; ref. 23)
+- Ensembl release 104 gene annotation for GRCh38 (`annotation/all_genes_EnsemblInfo_104.csv`; ref. 23), and the table derived from it with one name per gene (`annotation/all_genes_EnsemblInfo_104_1to1.csv`; version 1.3.0 onward)
 - Human MitoCarta3.0 (`annotation/Human.MitoCarta3.0.csv`; ref. 1)
 - GENESIS colour palette (`annotation/260122_GENESIS_color_palette.csv`)
 
 ## Code availability
 
-The pipeline code is in this directory (GENESIS unified processing pipeline v1.2.0, forked from GENESIS_iClust v1.0.1 and updated to v1.2.0). Release rc2 was made with GENESIS_iClust v1.0.1. SCTools is available at https://github.com/hoondy/SCTools (v0.8.0; v0.5.0 for rc2). The curation code is in [`milestone-3.3-taxonomy-integration`](../milestone-3.3-taxonomy-integration).
+The pipeline code is in this directory (GENESIS unified processing pipeline v1.3.0, forked from GENESIS_iClust v1.0.1 and updated to v1.3.0). Release rc2 was made with GENESIS_iClust v1.0.1. SCTools is available at https://github.com/hoondy/SCTools (v0.8.0; v0.5.0 for rc2). The curation code is in [`milestone-3.3-taxonomy-integration`](../milestone-3.3-taxonomy-integration).
 
 ## References
 
